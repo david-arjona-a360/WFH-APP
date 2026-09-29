@@ -62,8 +62,9 @@ selecciona: la selección solo cambia si la haces tú, con clic o con
 `Seleccionar visibles`. Así marcar `WFH` nunca arrastra a los 201 empleados
 por accident. Ordenar conserva lo que estuviera seleccionado.
 
-El color de la fila indica la modalidad: verde WFH, naranja OFFICE, gris sin
-asignar.
+El texto de la tabla es negro. Para distinguir la modalidad hay que mirar la
+columna `Modalidad`, que muestra `WFH`, `OFFICE` o `Sin asignar`: sin ese
+texto, una celda vacía no se diferenciaría de un dato que falta.
 
 ## Esquema de la base
 

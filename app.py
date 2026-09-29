@@ -25,6 +25,19 @@ ANCHOS = {"emp_num": 60, "nombres": 110, "apellidos": 130, "puesto": 190,
 COL_MODALIDAD = COLS.index("modalidad")
 
 
+def para_mostrar(fila: tuple) -> tuple:
+    """La modalidad vacia se muestra como texto, no como celda en blanco.
+
+    Con las letras en negro la columna Modalidad es la unica senal de que un
+    empleado no tiene asignada; si la celda quedara vacia no se distinguiria
+    de un dato que falta.
+    """
+    valores = list(fila)
+    if not valores[COL_MODALIDAD]:
+        valores[COL_MODALIDAD] = SIN_ASIGNAR
+    return tuple(valores)
+
+
 class App(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
@@ -135,7 +148,7 @@ class App(tk.Tk):
             iid = str(fila["id_empleado"])
             self.filas[iid] = tuple(fila[c] for c in COLS)
             self.tabla.insert(
-                "", "end", iid=iid, values=self.filas[iid],
+                "", "end", iid=iid, values=para_mostrar(self.filas[iid]),
                 tags=(fila["modalidad"] or "vacio",),
             )
         if self.columna_orden:
@@ -191,9 +204,11 @@ class App(tk.Tk):
             self.tabla.heading(col, text=ENCABEZADOS[col],
                                command=lambda c=col: self.ordenar(c))
             self.tabla.column(col, width=ANCHOS[col], anchor="w")
-        self.tabla.tag_configure("wfh", foreground="#14663a")
-        self.tabla.tag_configure("office", foreground="#7a4407")
-        self.tabla.tag_configure("vacio", foreground="#8a8a8a")
+        # Texto negro en toda la tabla: los colores por modalidad se
+        # distinguian por la fila, no por la letra.
+        self.tabla.tag_configure("wfh", foreground="#000000")
+        self.tabla.tag_configure("office", foreground="#000000")
+        self.tabla.tag_configure("vacio", foreground="#000000")
         self.tabla.bind("<<TreeviewSelect>>", self.al_seleccionar)
 
         scroll = ttk.Scrollbar(marco, orient="vertical",
@@ -276,7 +291,7 @@ class App(tk.Tk):
         self.tabla.delete(*self.tabla.get_children())
         for iid in indices:
             modalidad = self.filas[iid][COL_MODALIDAD]
-            self.tabla.insert("", "end", iid=iid, values=self.filas[iid],
+            self.tabla.insert("", "end", iid=iid, values=para_mostrar(self.filas[iid]),
                               tags=(modalidad or "vacio",))
         flecha = " ▼" if self.orden_desc else " ▲"
         for c in COLS:
