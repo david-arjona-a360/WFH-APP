@@ -141,7 +141,9 @@ class App(tk.Tk):
         if self.columna_orden:
             self.ordenar(self.columna_orden)
         self.actualizar_estado(filas)
-        self.tabla.selection_set(*self.filas)
+        # Sin auto-seleccion: al abrir o al filtrar la tabla arranca vacia.
+        # Para tomar todo lo que se ve esta el boton "Seleccionar visibles".
+        self.limpiar_seleccion()
 
     # --- interfaz ------------------------------------------------------
     def construir_widgets(self) -> None:
@@ -269,6 +271,8 @@ class App(tk.Tk):
                            str(self.filas[k][posicion] or "").lower()),
             reverse=self.orden_desc,
         )
+        # Reordenar no debe cambiar lo que esta seleccionado.
+        marcadas = self.tabla.selection()
         self.tabla.delete(*self.tabla.get_children())
         for iid in indices:
             modalidad = self.filas[iid][COL_MODALIDAD]
@@ -278,10 +282,22 @@ class App(tk.Tk):
         for c in COLS:
             texto = f"{ENCABEZADOS[c]}{flecha}" if c == col else ENCABEZADOS[c]
             self.tabla.heading(c, text=texto)
-        self.seleccionar_visibles()
+        siguen = [i for i in marcadas if i in self.filas]
+        if siguen:
+            self.tabla.selection_set(*siguen)
+        else:
+            self.limpiar_seleccion()
 
     def seleccionar_visibles(self) -> None:
+        if not self.filas:
+            self.limpiar_seleccion()
+            return
         self.tabla.selection_set(*self.filas)
+
+    def limpiar_seleccion(self) -> None:
+        self.tabla.selection_remove(*self.tabla.selection())
+        self.ids_seleccionados = set()
+        self.seleccion.set("Ningun empleado seleccionado")
 
     def al_seleccionar(self, _event) -> None:
         self.ids_seleccionados = {int(i) for i in self.tabla.selection()}

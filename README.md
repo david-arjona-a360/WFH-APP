@@ -57,6 +57,11 @@ históricamente vacíos. Si el departamento elegido ya no aplica, vuelve a
 - **Recargar Excel**: relee el origen y reconstruye la base, para que los
   cambios de RRHH (por ejemplo un `Active` que pasa a `Inactive`) se apliquen.
 
+La tabla arranca sin nada seleccionado, y filtrar o cambiar el estado tampoco
+selecciona: la selección solo cambia si la haces tú, con clic o con
+`Seleccionar visibles`. Así marcar `WFH` nunca arrastra a los 201 empleados
+por accident. Ordenar conserva lo que estuviera seleccionado.
+
 El color de la fila indica la modalidad: verde WFH, naranja OFFICE, gris sin
 asignar.
 
