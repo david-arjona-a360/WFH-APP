@@ -1,0 +1,21 @@
+# Datos de RRHH - nunca subir a GitHub
+*.xlsx
+*.xls
+
+# Base de datos derivada: contiene PII y se regenera con db/load_db.py
+db/*.db
+db/*.db-wal
+db/*.db-shm
+*.sqlite
+*.sqlite3
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+
+# Sistema
+.DS_Store
+Thumbs.db
