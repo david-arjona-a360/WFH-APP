@@ -68,21 +68,17 @@ class Sesion:
     """Quien esta usando la app y que puede ver."""
 
     def __init__(self, fila: sqlite3.Row, departamentos: list[str],
-                 avisos: list[str] | None = None) -> None:
+                 identidad_no_verificada: bool = False) -> None:
         self.id = fila["id"]
         self.windows_id = fila["windows_id"]
         self.nombre = fila["nombre"]
         self.rol = fila["rol"]
         self.departamentos = departamentos
-        self.avisos = avisos or []
+        self.identidad_no_verificada = identidad_no_verificada
 
     @property
     def es_admin(self) -> bool:
         return self.rol == "admin"
-
-    @property
-    def identidad_no_verificada(self) -> bool:
-        return bool(self.avisos)
 
 
 def _dialogo(titulo: str, mensaje: str, icono: str = "error") -> None:
@@ -143,21 +139,22 @@ def iniciar_sesion() -> Sesion | None:
         )
         return None
 
-    # Si la identidad se resolvio por variables de entorno, no es una garantia:
+    # Si la identidad se dedujo de variables de entorno, no es una garantia:
     # se puede falsear desde la consola. Se avisa al abrir y ademas queda a la
     # vista en la cabecera, porque un cartel inicial se pasa por alto.
-    avisos = control.avisos()
-    if avisos:
+    # Que falle ctypes NO cuenta: solo importa de donde salio el nombre.
+    if not control.identidad_confiable():
         _dialogo(
             "Identidad no verificada",
             "La identidad de Windows se resolvio por un metodo que no es "
             "confiable:\n\n"
-            + "\n".join(avisos)
+            + "\n".join(control.avisos())
             + "\n\nAlguien con acceso a esta consola podria suplantar una "
               "identidad. En una maquina de dominio esto no deberia pasar.",
             icono="warning",
         )
-    return Sesion(fila, control.departamentos_de(fila["id"]), avisos)
+    return Sesion(fila, control.departamentos_de(fila["id"]),
+                  not control.identidad_confiable())
 
 
 class App(tk.Tk):
@@ -794,7 +791,8 @@ class VentanaUsuarios(tk.Toplevel):
 
         existentes = control.listar_usuarios()
         if self.editando is None:
-            if any(u["windows_id"].lower() == windows_id.lower() for u in existentes):
+            if any(control.clave(u["windows_id"]) == control.clave(windows_id)
+                   for u in existentes):
                 messagebox.showerror("Ya existe",
                                      f"La cuenta {windows_id} ya existe.")
                 return
@@ -806,7 +804,8 @@ class VentanaUsuarios(tk.Toplevel):
                 return
             otro = next((u for u in existentes
                          if u["id"] != self.editando
-                         and u["windows_id"].lower() == windows_id.lower()), None)
+                         and control.clave(u["windows_id"]) == control.clave(windows_id)
+                         ), None)
             if otro is not None:
                 messagebox.showerror("Ya existe",
                                      f"La cuenta {windows_id} ya existe.")

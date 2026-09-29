@@ -56,15 +56,27 @@ demás cuentas las agrega un admin desde **Gestionar usuarios**.
 La app no deja quedarse sin administración: no se puede eliminar la única
 cuenta de admin, ni degradarla, ni borrar la propia sesión.
 
-**Sobre la identidad.** Se resuelve por `GetUserNameExW`, luego por el SID del
-token del proceso, luego `GetUserNameW`. Si las tres fallan se cae a las
-variables de entorno, que **son falseables a mano** desde la consola: la app lo
-avisa por pantalla, pero conviene saber que ahí la identidad ya no es una
-garantía. Para diagnosticar:
+**Sobre la identidad.** La app no depende de que `ctypes` resuelva símbolos de
+Windows, porque en algunas instalaciones de Python no lo hace y ahí la
+identidad se caía a las variables de entorno. La vía principal es
+`os.getlogin()`, que en Windows está implementado en C sobre `GetUserNameW` y
+lee el **token del proceso**: no se puede falsear escribiendo `USERNAME` en la
+consola. Detrás quedan el SID del proceso y `GetUserNameExW`, que además
+aportan el dominio, y al final las variables de entorno, que sí se falsean y
+por eso disparan el aviso en pantalla y la marca*naranja* en la cabecera.
+
+Las cuentas se comparan por nombre de usuario, sin dominio, porque no todas
+las vías lo devuelven: exigirlo haría que la misma persona entrara o no según
+cómo se hubiera resuelto ese día.
+
+Para diagnosticar, y para comprobar que la identidad no viene del entorno:
 
 ```bash
 python db/control.py
+set USERNAME=ATALAJA && python db/control.py
 ```
+
+En ambos casos debe salir tu usuario real y `confiable = True`.
 
 ## Estructura
 

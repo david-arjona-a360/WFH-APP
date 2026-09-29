@@ -3,15 +3,22 @@
 La identidad se toma de la sesion de Windows, no de una clave: no hay
 passwords. Cada persona entra con su cuenta de Windows del dominio.
 
-La identidad se resuelve por esta via, de la mas segura a la menos:
+La identidad se resuelve por esta via, de la mas confiable a la menos:
 
-1. GetUserNameExW        -> DOMINIO\\usuario, leido del token del proceso
-2. SID + LookupAccountSid-> DOMINIO\\usuario, si la anterior no existe
-3. GetUserNameW          -> solo el nombre de usuario
-4. Variables de entorno  -> falseable a proposito, deja rastro en el log
+1. os.getlogin()       -> lee el token del proceso, no el entorno
+2. SID + LookupAccountSid -> DOMINIO\\usuario, si lo anterior no existe
+3. GetUserNameExW      -> DOMINIO\\usuario
+4. GetUserNameW        -> solo el nombre de usuario
+5. Variables de entorno -> falseable a proposito, deja rastro en el aviso
 
-Si ninguna funciona se devuelve None y la app cierra: caer a variables de
-entorno en silencio permitiria falsear la identidad.
+El paso 1 va primero a proposito: va por la API de Windows desde C y no
+depende de que ctypes resuelva el simbolo, que falla en algunas instalaciones
+de Python. Los pasos 2 a 4 dan ademas el dominio, que es un dato bonito pero
+no necesario: las cuentas se comparan por nombre de usuario, no por
+DOMINIO\\usuario.
+
+Si ninguna via tokenizer funciona se devuelve None y la app cierra: caer a
+variables de entorno en silencio permitiria falsear la identidad.
 """
 
 import ctypes
@@ -35,13 +42,31 @@ PUEDE_CREAR_ADMIN = {
 }
 
 _aviso = []
+# Metodos que leen el token del proceso y por tanto si son confiables.
+_confiable = True
 
 
 def avisos() -> list[str]:
     return list(_aviso)
 
 
+def identidad_confiable() -> bool:
+    """False si la identidad se acabo dedujendo de variables de entorno."""
+    return _confiable
+
+
 # --- identidad de Windows -----------------------------------------------
+def _por_getlogin() -> str | None:
+    """La via mas simple y la que mas veces funciona.
+
+    En Windows os.getlogin() esta implementado en C sobre GetUserNameW, que
+    lee el token del proceso. No mira USERNAME ni el resto del entorno, asi
+    que no se puede falsear desde la consola. Devuelve el nombre sin dominio.
+    """
+    nombre = os.getlogin()
+    return nombre or None
+
+
 def _por_getusernameex() -> str | None:
     from ctypes import wintypes
     fn = ctypes.windll.advapi32.GetUserNameExW
@@ -49,7 +74,8 @@ def _por_getusernameex() -> str | None:
                    ctypes.POINTER(wintypes.DWORD)]
     fn.restype = wintypes.BOOL
     tam = wintypes.DWORD(0)
-    if not fn(None, 0, None, ctypes.byref(tam)):
+    fn(None, 0, None, ctypes.byref(tam))
+    if not tam.value:
         return None
     buf = ctypes.create_unicode_buffer(tam.value)
     return buf.value if fn(None, 0, buf, ctypes.byref(tam)) else None
@@ -129,15 +155,23 @@ def _por_getusername() -> str | None:
     return buf.value if fn(buf, ctypes.byref(tam)) else None
 
 
+# (etiqueta, funcion, si lee el token del proceso)
+_VIAS = (
+    ("os.getlogin (token)", _por_getlogin),
+    ("SID + LookupAccountSid", _por_sid),
+    ("GetUserNameExW", _por_getusernameex),
+    ("GetUserNameW", _por_getusername),
+)
+
+
 def identidad() -> str | None:
-    """DOMINIO\\usuario de la sesion de Windows, o None si no se puede."""
+    """Usuario de la sesion de Windows, o None si no se puede saber."""
+    global _confiable
     if not hasattr(ctypes, "windll"):
         _aviso.append("No es Windows: la identidad de usuario no esta disponible.")
         return None
 
-    for nombre, fn in (("GetUserNameExW", _por_getusernameex),
-                       ("SID", _por_sid),
-                       ("GetUserNameW", _por_getusername)):
+    for nombre, fn in _VIAS:
         try:
             valor = fn()
         except Exception as error:
@@ -148,29 +182,41 @@ def identidad() -> str | None:
 
     # Ultimo recurso. Se admite pero queda registrado: USERNAME se puede
     # cambiar desde la linea de comandos.
+    _confiable = False
     usuario = os.environ.get("USERNAME") or os.environ.get("USER")
     if usuario:
-        dominio = os.environ.get("USERDOMAIN", "")
         _aviso.append(
             f"Identidad tomada de variables de entorno ({usuario}). "
             "No es confiable: se puede falsear desde la consola."
         )
-        return f"{dominio}\\{usuario}" if dominio else usuario
+        return usuario
     return None
 
 
 def nombre_corto(windows_id: str) -> str:
-    return windows_id.split("\\")[-1]
+    """'a360inc\\julio.lerma' -> 'julio.lerma'."""
+    return windows_id.split("\\")[-1].strip()
+
+
+def clave(windows_id: str) -> str:
+    """La clave con la que se compara una cuenta contra la sesion.
+
+    Es el nombre de usuario en minusculas, sin dominio. Hace falta porque
+    unas vias de identidad devuelven 'DOMINIO\\usuario' y otras solo
+    'usuario': si la comparacion exigiera el dominio, la misma persona
+    entraria o no segun como se haya resuelto ese dia.
+    """
+    return nombre_corto(windows_id).lower()
 
 
 def nombre_desde_windows(windows_id: str) -> str:
-    """'a360inc\\julio.lerma' -> 'Julio Lerma', solo para mostrar."""
+    """'julio.lerma' -> 'Julio Lerma', solo para mostrar."""
     partes = nombre_corto(windows_id).replace("_", ".").replace("-", ".")
     return " ".join(p.capitalize() for p in partes.split(".") if p) or windows_id
 
 
 def es_arrancador(windows_id: str) -> bool:
-    return nombre_corto(windows_id).lower() in PUEDE_CREAR_ADMIN
+    return clave(windows_id) in PUEDE_CREAR_ADMIN
 
 
 def departamentos_disponibles() -> list[str]:
@@ -227,6 +273,8 @@ def crear_usuario(windows_id: str, nombre: str, rol: str,
                   departamentos: list[str]) -> int:
     if rol not in ROLES:
         raise ValueError(f"Rol desconocido: {rol}")
+    if buscar_usuario(windows_id) is not None:
+        raise ValueError(f"Ya existe una cuenta para {clave(windows_id)}")
     con = conectar()
     with con:
         cur = con.execute(
@@ -250,17 +298,24 @@ def _poner_departamentos(con, id_usuario: int, departamentos: list[str]) -> None
 
 
 def buscar_usuario(windows_id: str) -> sqlite3.Row | None:
+    """Busca por nombre de usuario, con o sin dominio delante.
+
+    Se recorre la tabla en vez de comparar en SQL porque el dominio puede
+    venir o no y SQLite no parte cadenas por la barra invertida de forma
+    portable. Con unas cuantas cuentas da igual.
+    """
+    buscado = clave(windows_id)
     con = conectar()
-    fila = con.execute(
-        "SELECT * FROM usuarios WHERE windows_id = ? COLLATE NOCASE",
-        (windows_id,),
-    ).fetchone()
-    if fila:
-        con.execute("UPDATE usuarios SET ultimo_acceso = ? WHERE id = ?",
-                    (ahora(), fila["id"]))
-        con.commit()
-    con.close()
-    return fila
+    try:
+        fila = next((u for u in con.execute("SELECT * FROM usuarios")
+                     if clave(u["windows_id"]) == buscado), None)
+        if fila:
+            con.execute("UPDATE usuarios SET ultimo_acceso = ? WHERE id = ?",
+                        (ahora(), fila["id"]))
+            con.commit()
+        return fila
+    finally:
+        con.close()
 
 
 def departamentos_de(id_usuario: int) -> list[str]:
@@ -363,21 +418,27 @@ def historial(departamentos: list[str] | None, limite: int = 500
 # --- diagnostico ---------------------------------------------------------
 def diagnostico() -> None:
     print("Diagnostico de identidad de Windows\n")
-    print("  USERNAME (env)      =", os.environ.get("USERNAME"))
-    print("  USERDOMAIN (env)    =", os.environ.get("USERDOMAIN"))
-    print("  getpass.getuser()   =", __import__("getpass").getuser())
+    print("  USERNAME (entorno)  =", os.environ.get("USERNAME"), " <- falseable")
+    print("  getpass.getuser()   =", __import__("getpass").getuser(), " <- falseable")
     print()
-    for nombre, fn in (("GetUserNameExW", _por_getusernameex),
-                       ("SID + LookupAccountSid", _por_sid),
-                       ("GetUserNameW", _por_getusername)):
+    for nombre, fn in _VIAS:
         try:
-            print(f"  {nombre:<26} = {fn()}")
+            print(f"  {nombre:<22} = {fn()}")
         except Exception as error:
-            print(f"  {nombre:<26} fallo: {error}")
+            print(f"  {nombre:<22} fallo: {error}")
     print()
     print("  identidad resuelta  =", identidad())
+    print("  confiable           =", identidad_confiable())
+    print("  clave de comparacion=", clave(identidad() or ""))
+    print()
     for a in avisos():
         print("  aviso:", a)
+    if not avisos():
+        print("  sin avisos: se pudo leer la identidad del token del proceso.")
+    print()
+    print("  Para comprobar que no lee el entorno,_falsealo en otra terminal:")
+    print("      set USERNAME=ATALAJA && python db/control.py")
+    print("  os.getlogin() debe seguir devolviendo tu usuario de verdad.")
 
 
 if __name__ == "__main__":
