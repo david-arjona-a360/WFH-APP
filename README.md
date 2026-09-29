@@ -45,6 +45,11 @@ db/wfh.db           Base generada (no se versiona)
 - **Buscar**: por nombre, apellido, puesto, departamento o `Emp. #`.
 - **Departamento** y **Modalidad**: filtros desplegables.
 - **Estado**: `Solo activos` (por defecto), `Activos`, `Inactivos`, `Todos`.
+
+La lista de departamentos depende del filtro de estado: con `Solo activos`
+muestra solo los que tienen alguien activo (9 de 31), no los que quedaron
+históricamente vacíos. Si el departamento elegido ya no aplica, vuelve a
+`Todos`.
 - **Ordenar**: clic en el encabezado de cualquier columna.
 - **Asignar**: selecciona una o varias filas y marca `WFH` u `OFFICE`.
   `Quitar asignacion` las deja sin definir; `Seleccionar visibles` toma todas

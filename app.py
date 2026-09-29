@@ -74,13 +74,37 @@ class App(tk.Tk):
         self.combo_depto["values"] = ["Todos", *self.deptos]
         self.combo_mod["values"] = ["Todas", *MODALIDADES, SIN_ASIGNAR]
 
+    def condicion_estado(self) -> tuple[str, list]:
+        """El filtro de estado manda: los departamentos se listan segun el."""
+        if self.f_estado.get() == "Solo activos":
+            return "estado_laboral = 'Active'", []
+        if self.f_estado.get() in VALOR_ESTADO:
+            return "estado_laboral = ?", [VALOR_ESTADO[self.f_estado.get()]]
+        return "", []
+
+    def refrescar_filtros(self) -> None:
+        where_estado, params = self.condicion_estado()
+        extra = f" AND {where_estado}" if where_estado else ""
+        self.deptos = sorted(
+            r["departamento"] for r in self.consultar(
+                "SELECT DISTINCT departamento FROM v_empleados "
+                f"WHERE departamento IS NOT NULL{extra}",
+                tuple(params),
+            )
+        )
+        # Si el departamento seleccionado ya no aplica, se vuelve a "Todos"
+        # para no dejar el filtro en un valor que no existe en la lista.
+        if self.f_depto.get() != "Todos" and self.f_depto.get() not in self.deptos:
+            self.f_depto.set("Todos")
+        self.combo_depto["values"] = ["Todos", *self.deptos]
+        self.combo_mod["values"] = ["Todas", *MODALIDADES, SIN_ASIGNAR]
+
     def condiciones(self) -> tuple[str, list]:
         where, params = [], []
-        if self.f_estado.get() == "Solo activos":
-            where.append("estado_laboral = 'Active'")
-        elif self.f_estado.get() in VALOR_ESTADO:
-            where.append("estado_laboral = ?")
-            params.append(VALOR_ESTADO[self.f_estado.get()])
+        where_estado, params_estado = self.condicion_estado()
+        if where_estado:
+            where.append(where_estado)
+            params.extend(params_estado)
         if self.f_depto.get() != "Todos":
             where.append("departamento = ?")
             params.append(self.f_depto.get())
@@ -152,7 +176,7 @@ class App(tk.Tk):
             values=ESTADOS_FILTRO)
         self.combo_estado.pack(side="left", padx=(4, 14))
         self.combo_estado.bind("<<ComboboxSelected>>",
-                               lambda _: self.cargar_empleados())
+                               lambda _: self.al_cambiar_estado())
 
         ttk.Button(filtros, text="Limpiar filtros",
                    command=self.limpiar_filtros).pack(side="left")
@@ -193,11 +217,17 @@ class App(tk.Tk):
         ttk.Label(marco, textvariable=self.mensaje, relief="sunken",
                   anchor="w", padding=4).pack(fill="x", pady=(10, 0))
 
+    def al_cambiar_estado(self) -> None:
+        """Cambiar el estado recalcula que departamentos aplican."""
+        self.refrescar_filtros()
+        self.cargar_empleados()
+
     def limpiar_filtros(self) -> None:
         self.busqueda.set("")
-        self.f_depto.set("Todos")
         self.f_modalidad.set("Todas")
         self.f_estado.set("Solo activos")
+        self.f_depto.set("Todos")
+        self.refrescar_filtros()
         self.cargar_empleados()
 
     def recargar_excel(self) -> None:
@@ -227,7 +257,6 @@ class App(tk.Tk):
         self.refrescar_filtros()
         self.cargar_empleados()
         self.mensaje.set("Excel recargado.")
-
     def ordenar(self, col: str) -> None:
         if self.columna_orden == col:
             self.orden_desc = not self.orden_desc
@@ -269,7 +298,9 @@ class App(tk.Tk):
 
     # --- escritura -----------------------------------------------------
     def asignar(self, modalidad: str | None) -> None:
-        ids = sorted(self.ids_seleccionados)
+        # Se lee la seleccion real de la tabla, no una copia cacheada: si el
+        # evento de seleccion no llego, se evita tocar a la persona equivocada.
+        ids = sorted(int(i) for i in self.tabla.selection())
         if not ids:
             messagebox.showinfo(
                 "Sin seleccion", "Selecciona al menos un empleado en la tabla.")
